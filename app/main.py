@@ -13,6 +13,13 @@ logger = logging.getLogger('LiveYoung')
 # Ensure app module is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
+st.set_page_config(
+    page_title="LiveYoung - Manufacturing ERP",
+    page_icon="🧪",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
 from app.db import init_db
 
 # Initialize DB on first run
@@ -23,13 +30,6 @@ try:
 except Exception as e:
     logger.error(f"Database init failed: {e}")
     st.error(f"Failed to connect to database: {e}")
-
-st.set_page_config(
-    page_title="LiveYoung - Manufacturing ERP",
-    page_icon="🧪",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 # Custom CSS for cleaner look
 st.markdown("""
@@ -56,23 +56,23 @@ page = st.sidebar.radio(
 
 # Route to pages
 if page == "Dashboard":
-    from app.pages.dashboard import render
+    from app.views.dashboard import render
     render()
 elif page == "Raw Materials":
-    from app.pages.raw_materials import render
+    from app.views.raw_materials import render
     render()
 elif page == "Products & Formulations":
-    from app.pages.formulations import render
+    from app.views.formulations import render
     render()
 elif page == "SKUs & Launch Plan":
-    from app.pages.skus import render
+    from app.views.skus import render
     render()
 elif page == "Costing & Pricing":
-    from app.pages.costing import render
+    from app.views.costing import render
     render()
 elif page == "Order Requirements":
-    from app.pages.orders import render
+    from app.views.orders import render
     render()
 elif page == "Inventory":
-    from app.pages.inventory import render
+    from app.views.inventory import render
     render()
