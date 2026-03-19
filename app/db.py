@@ -62,8 +62,8 @@ def _get_client():
         if os.path.exists(CREDS_FILE):
             _cache['gs_client'] = gspread.service_account(filename=CREDS_FILE)
         else:
-            # For Streamlit Cloud: credentials stored in secrets
-            creds_dict = json.loads(st.secrets["gcp_service_account"])
+            # For Streamlit Cloud: credentials stored in secrets (TOML format)
+            creds_dict = dict(st.secrets["gcp_service_account"])
             _cache['gs_client'] = gspread.service_account_from_dict(creds_dict)
     return _cache['gs_client']
 

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \":*)",
+      "Bash(python3 -m app.seed_from_excel)",
+      "Bash(pkill -f \"streamlit run\")",
+      "Bash(pip install:*)",
+      "Bash(python3 -m pip install gspread)",
+      "Bash(timeout 15 python3 -m streamlit run app/main.py --server.port 8502 --server.headless true)",
+      "Bash(gh auth:*)",
+      "Bash(gh repo:*)",
+      "Bash(gh api:*)"
+    ]
+  }
+}

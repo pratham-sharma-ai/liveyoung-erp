@@ -1,6 +1,14 @@
 import streamlit as st
 import os
 import sys
+import logging
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+)
+logger = logging.getLogger('LiveYoung')
 
 # Ensure app module is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -8,7 +16,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from app.db import init_db
 
 # Initialize DB on first run
-init_db()
+try:
+    logger.info("Initializing database connection...")
+    init_db()
+    logger.info("Database initialized successfully")
+except Exception as e:
+    logger.error(f"Database init failed: {e}")
+    st.error(f"Failed to connect to database: {e}")
 
 st.set_page_config(
     page_title="LiveYoung - Manufacturing ERP",
