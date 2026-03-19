@@ -6,7 +6,8 @@ from app.engine import get_dashboard_summary
 def render():
     st.title("Dashboard")
 
-    summary = get_dashboard_summary()
+    with st.spinner("Loading dashboard..."):
+        summary = get_dashboard_summary()
 
     # Top-level metrics
     c1, c2, c3, c4 = st.columns(4)

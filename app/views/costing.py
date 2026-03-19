@@ -10,7 +10,8 @@ def render():
     tab1, tab2 = st.tabs(["All Products", "Product Detail"])
 
     with tab1:
-        costings = get_all_product_costings()
+        with st.spinner("Loading costing data..."):
+            costings = get_all_product_costings()
         active = [c for c in costings if c is not None]
 
         if active:

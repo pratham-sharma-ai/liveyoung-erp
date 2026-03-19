@@ -5,9 +5,11 @@ All monetary values in INR. Weights in grams unless noted.
 Optimized: loads all data once from Google Sheets, computes everything in memory.
 """
 
+import streamlit as st
 from app.db import fetch_all, fetch_one, _get_all_rows
 
 
+@st.cache_data(ttl=60)
 def _load_all_data():
     """Load all tables once. Returns a dict of all data needed for calculations."""
     products = _get_all_rows('products')

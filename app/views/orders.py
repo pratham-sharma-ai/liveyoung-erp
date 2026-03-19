@@ -7,7 +7,8 @@ def render():
     st.title("Order Requirements")
     st.caption("Total raw material needed across all products, with MOQ and inventory analysis")
 
-    orders = get_rm_order_requirements()
+    with st.spinner("Calculating order requirements..."):
+        orders = get_rm_order_requirements()
 
     # Filter to only materials that are actually needed
     needed = [r for r in orders if r['total_grams_needed'] > 0]

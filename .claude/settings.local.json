@@ -9,7 +9,8 @@
       "Bash(timeout 15 python3 -m streamlit run app/main.py --server.port 8502 --server.headless true)",
       "Bash(gh auth:*)",
       "Bash(gh repo:*)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "WebFetch(domain:liveyoung-erp-hp8ptbbi4effyskegcf7ww.streamlit.app)"
     ]
   }
 }
