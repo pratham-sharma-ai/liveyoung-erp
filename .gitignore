@@ -1,0 +1,7 @@
+credentials.json
+data/
+*.xlsx
+*.pdf
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
