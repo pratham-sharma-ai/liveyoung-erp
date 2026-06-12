@@ -1,6 +1,16 @@
 """
-One-time seed: imports all data from the Excel workbook into Google Sheets.
+One-time seed: imports all data from the V11 Excel workbook into Google Sheets.
 Run this once to populate the sheets.
+
+V11 sheet → Google Sheets table mapping:
+  A3. RM Master        → raw_materials
+  A4. Vendor Rate Master → raw_materials (rates / MOQ / lead time)
+  A1. SKU Master       → products
+  A2. Formulation Master → formulations
+  B1. Launch Plan      → skus
+  A5. PM Component Master → packaging_configs
+  A3. RM Master col G  → inventory
+  (hardcoded)          → launch_phases
 """
 
 import os
@@ -11,35 +21,9 @@ import gspread
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-EXCEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'MOQ and Costing V6-2 (1).xlsx')
+EXCEL_PATH = os.path.join(os.path.dirname(__file__), '..', 'Inovae_NutraCare_V11.xlsx')
 CREDS_FILE = os.path.join(os.path.dirname(__file__), '..', 'credentials.json')
 SHEET_ID = "1HAYm6Jm1_Inakqv04krAruHUQbryZoTff7OQckMAZsA"
-
-# Product column mapping in the Excel (columns E-S in Formulation-SKU)
-PRODUCT_COLUMNS = {
-    'E': 'WM-TAB', 'F': 'WM-POW', 'G': 'PPCOS-Pro-TAB', 'H': 'PPCOS-Pro-POW',
-    'I': 'ENERGY-POW', 'J': 'ENERGY-GEL', 'K': 'Dys-Tablet', 'L': 'Dys-Pow',
-    'M': 'Diabetic-Tablet', 'N': 'Diabetic-powder', 'O': 'LIVER-TAB',
-    'P': 'Liver-powder', 'Q': 'GUT-POW', 'R': 'GUT-CAP', 'S': 'PCOS-TAB',
-}
-
-PRODUCT_META = {
-    'WM-TAB': ('WM', 'TAB'), 'WM-POW': ('WM', 'POW'),
-    'PPCOS-Pro-TAB': ('PPCOS-Pro', 'TAB'), 'PPCOS-Pro-POW': ('PPCOS-Pro', 'POW'),
-    'ENERGY-POW': ('ENERGY', 'POW'), 'ENERGY-GEL': ('ENERGY', 'GEL'),
-    'Dys-Tablet': ('Dys', 'TAB'), 'Dys-Pow': ('Dys', 'POW'),
-    'Diabetic-Tablet': ('Diabetic', 'TAB'), 'Diabetic-powder': ('Diabetic', 'POW'),
-    'LIVER-TAB': ('LIVER', 'TAB'), 'Liver-powder': ('LIVER', 'POW'),
-    'GUT-POW': ('GUT', 'POW'), 'GUT-CAP': ('GUT', 'CAP'),
-    'PCOS-TAB': ('PCOS', 'TAB'),
-}
-
-UNIT_REQ_COL = {
-    'WM-TAB': 4, 'WM-POW': 5, 'PPCOS-Pro-TAB': 6, 'PPCOS-Pro-POW': 7,
-    'ENERGY-POW': 8, 'ENERGY-GEL': 9, 'Dys-Tablet': 10, 'Dys-Pow': 11,
-    'Diabetic-Tablet': 12, 'Diabetic-powder': 13, 'LIVER-TAB': 14,
-    'Liver-powder': 15, 'GUT-POW': 16, 'GUT-CAP': 17, 'PCOS-TAB': 18,
-}
 
 SCHEMAS = {
     'raw_materials': ['id', 'name', 'moq_kg', 'rate_per_kg', 'category', 'source',
@@ -56,29 +40,10 @@ SCHEMAS = {
 }
 
 
-def col_idx(letter):
-    idx = 0
-    for ch in letter:
-        idx = idx * 26 + (ord(ch.upper()) - ord('A') + 1)
-    return idx
-
-
-def val(ws, row, col):
-    v = ws.cell(row=row, column=col).value
-    if v is None:
-        return 0
-    if isinstance(v, str):
-        try:
-            return float(v)
-        except ValueError:
-            return v
-    return v
-
-
 def safe_str(v):
     if v is None:
         return ''
-    return str(v)
+    return str(v).strip()
 
 
 def safe_float(v, default=0):
@@ -86,27 +51,32 @@ def safe_float(v, default=0):
         return default
     if isinstance(v, str):
         try:
-            return float(v)
+            return float(v.replace(',', ''))
         except ValueError:
             return default
-    return float(v)
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return default
 
 
 def batch_write(ws, rows, schema):
-    """Write rows in batches to respect rate limits."""
+    """Write rows in batches to respect API rate limits."""
     BATCH_SIZE = 50
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i:i + BATCH_SIZE]
-        # Convert each row dict to list in schema order
         values = []
         for row in batch:
             values.append([safe_str(row.get(col, '')) for col in schema])
-        start_row = i + 2  # +1 for header, +1 for 1-indexed
+        start_row = i + 2  # +1 header, +1 for 1-indexed
         end_col = chr(ord('A') + len(schema) - 1)
-        ws.update(f'A{start_row}:{end_col}{start_row + len(values) - 1}',
-                  values, value_input_option='RAW')
+        ws.update(
+            values=values,
+            range_name=f'A{start_row}:{end_col}{start_row + len(values) - 1}',
+            value_input_option='RAW',
+        )
         if i + BATCH_SIZE < len(rows):
-            time.sleep(1)  # Rate limit
+            time.sleep(1)
 
 
 def seed():
@@ -114,20 +84,20 @@ def seed():
     gc = gspread.service_account(filename=CREDS_FILE)
     ss = gc.open_by_key(SHEET_ID)
 
-    # Create/clear all worksheets
+    # ─── Create / clear all worksheets ────────────────────────────────────────
     existing = {ws.title: ws for ws in ss.worksheets()}
     for table_name, schema in SCHEMAS.items():
         if table_name in existing:
             ws = existing[table_name]
             ws.clear()
-            ws.update('A1', [schema])
+            ws.update(values=[schema], range_name='A1')
         else:
             ws = ss.add_worksheet(title=table_name, rows=1000, cols=len(schema))
-            ws.update('A1', [schema])
+            ws.update(values=[schema], range_name='A1')
         ws.format('A1:Z1', {'textFormat': {'bold': True}})
         time.sleep(0.5)
 
-    # Remove default Sheet1 if it exists
+    # Remove default Sheet1 if present
     if 'Sheet1' in existing:
         try:
             ss.del_worksheet(existing['Sheet1'])
@@ -137,307 +107,401 @@ def seed():
     print(f"Loading Excel: {EXCEL_PATH}")
     wb = openpyxl.load_workbook(EXCEL_PATH, data_only=True)
 
-    # =============================================
+    # =========================================================================
     # 1. RAW MATERIALS
-    # =============================================
+    #    A3. RM Master: A=RM ID, B=RM Name, C=Category, D=UOM, E=Regulatory/Source,
+    #                   F=Active Status, G=Avail @ Karsy (g)
+    #    A4. Vendor Rate Master: A=RM ID, F=Rate/kg, G=MOQ, H=Lead Time
+    # =========================================================================
     print("Importing raw materials...")
-    ws_rm = wb['RM Proqurement & MOQ']
-    rm_rows = []
-    rm_id = 0
+    ws_rm = wb['A3. RM Master']
+    ws_vr = wb['A4. Vendor Rate Master']
 
-    for row in range(3, ws_rm.max_row + 1):
-        name = ws_rm.cell(row=row, column=3).value
-        if not name or not isinstance(name, str) or name.strip() == '':
+    # Build vendor-rate lookup keyed by RM ID (integer)
+    vendor_rates = {}  # rm_id -> {rate, moq, lead_time, vendor_name, negotiator}
+    for row in range(4, ws_vr.max_row + 1):
+        rm_id_raw = ws_vr.cell(row=row, column=1).value
+        if rm_id_raw is None:
             continue
-        name = name.strip()
-        rm_id += 1
+        try:
+            rm_id_key = int(rm_id_raw)
+        except (ValueError, TypeError):
+            continue
+        active = safe_str(ws_vr.cell(row=row, column=10).value).lower()
+        if active != 'yes':
+            continue
+        vendor_rates[rm_id_key] = {
+            'vendor_name': safe_str(ws_vr.cell(row=row, column=4).value),
+            'negotiator': safe_str(ws_vr.cell(row=row, column=5).value),
+            'rate': safe_float(ws_vr.cell(row=row, column=6).value),
+            'moq': safe_float(ws_vr.cell(row=row, column=7).value),
+            'lead_time': safe_float(ws_vr.cell(row=row, column=8).value),
+        }
 
-        moq = safe_float(val(ws_rm, row, 5))
-        rate = safe_float(val(ws_rm, row, 6))
-        category = val(ws_rm, row, 7)
-        source = val(ws_rm, row, 8)
-        negotiator = val(ws_rm, row, 4)
-        vendor1 = val(ws_rm, row, 10)
-        vendor2 = val(ws_rm, row, 11)
-        vendor3 = val(ws_rm, row, 12)
-        remarks = val(ws_rm, row, 13)
+    rm_rows = []
+    rm_id_to_seq = {}   # excel RM ID (int) -> sequential row id
+    rm_id_to_name = {}  # excel RM ID (int) -> name string
+
+    seq_id = 0
+    for row in range(4, ws_rm.max_row + 1):
+        rm_id_raw = ws_rm.cell(row=row, column=1).value
+        name_raw = ws_rm.cell(row=row, column=2).value
+        if rm_id_raw is None or name_raw is None:
+            continue
+        name = safe_str(name_raw)
+        if not name:
+            continue
+        try:
+            rm_id_excel = int(rm_id_raw)
+        except (ValueError, TypeError):
+            continue
+
+        seq_id += 1
+        rm_id_to_seq[rm_id_excel] = seq_id
+        rm_id_to_name[rm_id_excel] = name
+
+        category = safe_str(ws_rm.cell(row=row, column=3).value)
+        source = safe_str(ws_rm.cell(row=row, column=5).value)
+
+        vr = vendor_rates.get(rm_id_excel, {})
+        rate = vr.get('rate', 0)
+        moq = vr.get('moq', 0)
+        lead_time = vr.get('lead_time', 0)
+        vendor_name = vr.get('vendor_name', '')
+        negotiator = vr.get('negotiator', '')
+
+        # Store lead time in remarks (no dedicated column yet)
+        remarks = f"Lead Time: {int(lead_time)} days" if lead_time else ''
 
         rm_rows.append({
-            'id': rm_id, 'name': name,
-            'moq_kg': moq, 'rate_per_kg': rate,
-            'category': safe_str(category) if not isinstance(category, (int, float)) else '',
-            'source': safe_str(source) if not isinstance(source, (int, float)) else '',
-            'negotiator': safe_str(negotiator) if not isinstance(negotiator, (int, float)) else '',
-            'vendor1': safe_str(vendor1) if not isinstance(vendor1, (int, float)) else '',
-            'vendor2': safe_str(vendor2) if not isinstance(vendor2, (int, float)) else '',
-            'vendor3': safe_str(vendor3) if not isinstance(vendor3, (int, float)) else '',
-            'remarks': safe_str(remarks) if not isinstance(remarks, (int, float)) else '',
+            'id': seq_id,
+            'name': name,
+            'moq_kg': moq,
+            'rate_per_kg': rate,
+            'category': category,
+            'source': source,
+            'negotiator': negotiator,
+            'vendor1': vendor_name,
+            'vendor2': '',
+            'vendor3': '',
+            'remarks': remarks,
         })
 
-    ws = ss.worksheet('raw_materials')
-    batch_write(ws, rm_rows, SCHEMAS['raw_materials'])
+    ws_gsheet = ss.worksheet('raw_materials')
+    batch_write(ws_gsheet, rm_rows, SCHEMAS['raw_materials'])
     print(f"  Imported {len(rm_rows)} raw materials")
-
-    # Build name->id map
-    rm_name_to_id = {r['name']: r['id'] for r in rm_rows}
     time.sleep(1)
 
-    # =============================================
-    # 2. PRODUCTS
-    # =============================================
+    # =========================================================================
+    # 2. PACKAGING COST per SKU from A6. Packaging BOM
+    #    Columns: A=SKU ID, D=Qty per Pack, F=Rate (Rs), G=Cost per Pack (Rs)
+    #    Sum cost-per-pack values for each SKU ID
+    # =========================================================================
+    print("Computing packaging costs from A6. Packaging BOM...")
+    ws_bom = wb['A6. Packaging BOM']
+    pkg_cost_by_sku = {}  # sku_id -> total packaging cost per pack
+
+    for row in range(4, ws_bom.max_row + 1):
+        sku_id_raw = ws_bom.cell(row=row, column=1).value
+        if sku_id_raw is None:
+            continue
+        sku_id_str = safe_str(sku_id_raw)
+        if not sku_id_str:
+            continue
+        cost_per_pack = safe_float(ws_bom.cell(row=row, column=7).value)
+        pkg_cost_by_sku[sku_id_str] = pkg_cost_by_sku.get(sku_id_str, 0) + cost_per_pack
+
+    print(f"  Packaging cost map: {len(pkg_cost_by_sku)} SKUs")
+
+    # =========================================================================
+    # 3. PRODUCTS
+    #    A1. SKU Master: A=SKU ID, B=Display Name, C=Category, D=Format,
+    #    E=Status, F=Flavour, G=Pack Count, H=Units/Pack, I=Daily Dose,
+    #    J=Grammage (formula→data_only), K=Buffer%, L=GM% Target,
+    #    M=Proc Cost/Unit
+    #    base_code = col A, category = col C, delivery_form = col D
+    # =========================================================================
     print("Importing products...")
-    ws_ur = wb['Unit Requirement']
-    ws_uc = wb['Unit Cost']
+    ws_sku = wb['A1. SKU Master']
     prod_rows = []
-    prod_id = 0
-    product_id_map = {}
+    product_seq_id = 0
+    sku_id_to_prod_id = {}  # SKU ID string -> sequential product id
 
-    uc_col_map = {
-        'WM-TAB': 5, 'WM-POW': 6, 'PPCOS-Pro-TAB': 7, 'PPCOS-Pro-POW': 8,
-        'ENERGY-POW': 9, 'ENERGY-GEL': 10, 'Dys-Tablet': 11, 'Dys-Pow': 12,
-        'Diabetic-Tablet': 13, 'Diabetic-powder': 14, 'LIVER-TAB': 15,
-        'Liver-powder': 16, 'GUT-POW': 17, 'GUT-CAP': 18, 'PCOS-TAB': 19,
-    }
+    for row in range(4, ws_sku.max_row + 1):
+        sku_id_raw = ws_sku.cell(row=row, column=1).value
+        if sku_id_raw is None:
+            continue
+        sku_id_str = safe_str(sku_id_raw)
+        if not sku_id_str:
+            continue
 
-    for base_code, (category, delivery_form) in PRODUCT_META.items():
-        prod_id += 1
-        col = UNIT_REQ_COL[base_code]
-        uc_col = uc_col_map[base_code]
+        category = safe_str(ws_sku.cell(row=row, column=3).value)
+        delivery_form = safe_str(ws_sku.cell(row=row, column=4).value)
+        units_per_pack = safe_float(ws_sku.cell(row=row, column=8).value, 30)
+        daily_dose = safe_float(ws_sku.cell(row=row, column=9).value, 1)
+        buffer_pct = safe_float(ws_sku.cell(row=row, column=11).value, 0.05)
+        margin_pct = safe_float(ws_sku.cell(row=row, column=12).value, 0.70)
+        proc_cost = safe_float(ws_sku.cell(row=row, column=13).value, 0)
+        pkg_cost = pkg_cost_by_sku.get(sku_id_str, 0)
 
-        clinical_req = str(val(ws_ur, 4, col)).strip()
-        clinical = 1 if clinical_req.lower() == 'yes' else 0
-        duration = safe_float(val(ws_ur, 5, col))
-        participants = safe_float(val(ws_ur, 7, col))
-        packs_month = safe_float(val(ws_ur, 8, col))
-        units_per_pack = safe_float(val(ws_ur, 14, col), 30)
-        daily_cons = safe_float(val(ws_uc, 4, uc_col), 1)
-        processing = safe_float(val(ws_uc, 113, uc_col), 2)
-        packaging = safe_float(val(ws_uc, 131, uc_col), 0)
-        margin = safe_float(val(ws_uc, 118, uc_col), 0.70)
+        product_seq_id += 1
+        sku_id_to_prod_id[sku_id_str] = product_seq_id
 
         prod_rows.append({
-            'id': prod_id, 'base_code': base_code,
-            'category': category, 'delivery_form': delivery_form,
-            'daily_consumption': int(daily_cons),
+            'id': product_seq_id,
+            'base_code': sku_id_str,
+            'category': category,
+            'delivery_form': delivery_form,
+            'daily_consumption': int(daily_dose),
             'units_per_pack': int(units_per_pack),
-            'processing_cost_per_unit': processing,
-            'packaging_cost_per_pack': packaging,
-            'clinical_trial_required': clinical,
-            'clinical_duration_months': int(duration),
-            'clinical_participants': int(participants),
-            'clinical_packs_per_month': int(packs_month) if packs_month else 1,
-            'margin_percent': margin,
-            'buffer_percent': 0.10,
+            'processing_cost_per_unit': proc_cost,
+            'packaging_cost_per_pack': round(pkg_cost, 4),
+            'clinical_trial_required': 0,
+            'clinical_duration_months': 0,
+            'clinical_participants': 0,
+            'clinical_packs_per_month': 1,
+            'margin_percent': margin_pct,
+            'buffer_percent': buffer_pct,
         })
-        product_id_map[base_code] = prod_id
 
-    ws = ss.worksheet('products')
-    batch_write(ws, prod_rows, SCHEMAS['products'])
+    ws_gsheet = ss.worksheet('products')
+    batch_write(ws_gsheet, prod_rows, SCHEMAS['products'])
     print(f"  Imported {len(prod_rows)} products")
     time.sleep(1)
 
-    # =============================================
-    # 3. FORMULATIONS
-    # =============================================
+    # =========================================================================
+    # 4. FORMULATIONS
+    #    A2. Formulation Master: A=SKU ID, B=RM ID, C=Ingredient Name,
+    #    D=Qty/Unit (g), E=UOM, F=Formulation Version, G=Active Version Flag
+    #    Only import rows where G = "Yes"
+    # =========================================================================
     print("Importing formulations...")
-    ws_form = wb['Formulation - SKU']
+    ws_form = wb['A2. Formulation Master']
     form_rows = []
-    form_id = 0
+    form_seq_id = 0
+    skipped_form = 0
 
-    for row in range(6, ws_form.max_row + 1):
-        rm_name = ws_form.cell(row=row, column=3).value
-        if not rm_name or not isinstance(rm_name, str) or rm_name.strip() == '':
+    for row in range(4, ws_form.max_row + 1):
+        sku_id_raw = ws_form.cell(row=row, column=1).value
+        if sku_id_raw is None:
             continue
-        rm_name = rm_name.strip()
-        rm_id_val = rm_name_to_id.get(rm_name)
-        if not rm_id_val:
+        sku_id_str = safe_str(sku_id_raw)
+        if not sku_id_str:
             continue
 
-        for col_letter, base_code in PRODUCT_COLUMNS.items():
-            ci = col_idx(col_letter)
-            grams = ws_form.cell(row=row, column=ci).value
-            if not grams or grams == 0:
-                continue
-            try:
-                grams_val = float(grams)
-            except (ValueError, TypeError):
-                continue
-            if grams_val <= 0:
-                continue
+        active_flag = safe_str(ws_form.cell(row=row, column=7).value)
+        if active_flag.lower() != 'yes':
+            skipped_form += 1
+            continue
 
-            prod_id_val = product_id_map.get(base_code)
-            if not prod_id_val:
-                continue
+        rm_id_raw = ws_form.cell(row=row, column=2).value
+        if rm_id_raw is None:
+            skipped_form += 1
+            continue
+        try:
+            rm_id_excel = int(rm_id_raw)
+        except (ValueError, TypeError):
+            skipped_form += 1
+            continue
 
-            form_id += 1
-            form_rows.append({
-                'id': form_id,
-                'product_id': prod_id_val,
-                'raw_material_id': rm_id_val,
-                'grams_per_unit': grams_val,
-            })
+        grams = safe_float(ws_form.cell(row=row, column=4).value)
+        if grams <= 0:
+            skipped_form += 1
+            continue
 
-    ws = ss.worksheet('formulations')
-    batch_write(ws, form_rows, SCHEMAS['formulations'])
-    print(f"  Imported {len(form_rows)} formulation entries")
+        prod_id = sku_id_to_prod_id.get(sku_id_str)
+        if not prod_id:
+            skipped_form += 1
+            continue
+
+        rm_seq = rm_id_to_seq.get(rm_id_excel)
+        if not rm_seq:
+            skipped_form += 1
+            continue
+
+        form_seq_id += 1
+        form_rows.append({
+            'id': form_seq_id,
+            'product_id': prod_id,
+            'raw_material_id': rm_seq,
+            'grams_per_unit': grams,
+        })
+
+    ws_gsheet = ss.worksheet('formulations')
+    batch_write(ws_gsheet, form_rows, SCHEMAS['formulations'])
+    print(f"  Imported {len(form_rows)} formulation entries (skipped {skipped_form})")
     time.sleep(1)
 
-    # =============================================
-    # 4. SKUs
-    # =============================================
+    # =========================================================================
+    # 5. SKUs
+    #    B1. Launch Plan: A=SKU ID, B=Display Name, C=Category, D=Format,
+    #    E=Status, F=Phase 1, G=Phase 2, H=Phase 3, I=Phase 4, J=Trial
+    #    pack_count = sum of phases + trial
+    #    phase = first non-zero phase column (1-4), else 1 if trial only
+    # =========================================================================
     print("Importing SKUs...")
-    ws_lp = wb['Launch Plan']
+    ws_lp = wb['B1. Launch Plan']
     sku_rows = []
-    sku_id = 0
+    sku_seq_id = 0
 
-    for row in range(5, 22):
-        category = ws_lp.cell(row=row, column=4).value
-        delivery = ws_lp.cell(row=row, column=5).value
-        flavour_code = ws_lp.cell(row=row, column=6).value
-        flavour_name = ws_lp.cell(row=row, column=7).value
-        sku_code = ws_lp.cell(row=row, column=8).value
-        pack_count = ws_lp.cell(row=row, column=9).value
-
-        if not category or not delivery:
+    for row in range(3, ws_lp.max_row + 1):
+        sku_id_raw = ws_lp.cell(row=row, column=1).value
+        if sku_id_raw is None:
+            continue
+        sku_id_str = safe_str(sku_id_raw)
+        # Skip summary / totals rows
+        if not sku_id_str or sku_id_str.upper() in ('SKU ID', 'TOTAL'):
             continue
 
-        phase = 1
-        for p, col in [(1, 10), (2, 11), (3, 12), (4, 13)]:
-            v = ws_lp.cell(row=row, column=col).value
-            if v and v == 1:
-                phase = p
+        prod_id = sku_id_to_prod_id.get(sku_id_str)
+        if not prod_id:
+            print(f"  WARNING: No product match for SKU '{sku_id_str}' in launch plan — skipping")
+            continue
+
+        display_name = safe_str(ws_lp.cell(row=row, column=2).value)
+        # Flavour from A1. SKU Master (already loaded), default empty
+        flavour = ''
+        for pr in prod_rows:
+            if pr['base_code'] == sku_id_str:
+                break
+        # look up flavour from SKU master sheet
+        flavour_val = ws_sku.cell(
+            row=3 + list(sku_id_to_prod_id.keys()).index(sku_id_str) + 1,
+            column=6
+        ).value if sku_id_str in sku_id_to_prod_id else None
+        # simpler: iterate sku sheet for flavour
+        for sr in range(4, ws_sku.max_row + 1):
+            if safe_str(ws_sku.cell(row=sr, column=1).value) == sku_id_str:
+                flavour = safe_str(ws_sku.cell(row=sr, column=6).value)
                 break
 
-        base_code = f"{category}-{delivery}"
-        prod_id_val = product_id_map.get(base_code)
-        if not prod_id_val:
-            for bc, pid in product_id_map.items():
-                if category in bc and delivery in bc:
-                    prod_id_val = pid
-                    break
+        phase_vals = [
+            safe_float(ws_lp.cell(row=row, column=6).value),   # Phase 1
+            safe_float(ws_lp.cell(row=row, column=7).value),   # Phase 2
+            safe_float(ws_lp.cell(row=row, column=8).value),   # Phase 3
+            safe_float(ws_lp.cell(row=row, column=9).value),   # Phase 4
+            safe_float(ws_lp.cell(row=row, column=10).value),  # Trial
+        ]
+        pack_count = int(sum(phase_vals))
 
-        if not prod_id_val:
-            print(f"  WARNING: No product match for {base_code}")
-            continue
+        # Determine first non-zero phase (1-4); if only trial → phase 1
+        phase = 1
+        for p_idx, p_val in enumerate(phase_vals[:4], start=1):
+            if p_val > 0:
+                phase = p_idx
+                break
 
-        if not sku_code or str(sku_code).startswith('='):
-            sku_code = f"{str(category)[:2]}-{delivery}-{flavour_code}-{str(flavour_name or 'XX')[:2]}"
-
-        sku_id += 1
+        sku_seq_id += 1
         sku_rows.append({
-            'id': sku_id,
-            'product_id': prod_id_val,
-            'flavour_code': safe_str(flavour_code),
-            'flavour_name': safe_str(flavour_name),
-            'sku_code': safe_str(sku_code),
-            'pack_count': int(pack_count) if pack_count else 0,
+            'id': sku_seq_id,
+            'product_id': prod_id,
+            'flavour_code': flavour[:2] if flavour else '',
+            'flavour_name': flavour,
+            'sku_code': sku_id_str,
+            'pack_count': pack_count,
             'phase': phase,
         })
 
-    ws = ss.worksheet('skus')
-    batch_write(ws, sku_rows, SCHEMAS['skus'])
+    ws_gsheet = ss.worksheet('skus')
+    batch_write(ws_gsheet, sku_rows, SCHEMAS['skus'])
     print(f"  Imported {len(sku_rows)} SKUs")
     time.sleep(1)
 
-    # =============================================
-    # 5. PACKAGING CONFIGS
-    # =============================================
+    # =========================================================================
+    # 6. PACKAGING CONFIGS
+    #    A5. PM Component Master: A=PM ID, B=Component Name,
+    #    C=Applicable Formats, D=UOM, E=Rate, F=MOQ
+    # =========================================================================
     print("Importing packaging configs...")
-    pkg_data = [
-        ('GEL', 'Primary Sachets - Gel', 35),
-        ('POW', 'Primary Sachets - Powder (30-day)', 81),
-        ('TAB', 'Primary PET bottle 100cc', 9),
-        ('CAP', 'Primary PET bottle 100cc', 9),
-        ('TAB', 'Secondary Box for PET bottle', 90),
-        ('CAP', 'Secondary Box for PET bottle', 90),
-        ('TAB', 'Clear label for PET bottle', 6),
-        ('CAP', 'Clear label for PET bottle', 6),
-        ('TAB', 'Stickers on secondary box', 0.25),
-        ('CAP', 'Stickers on secondary box', 0.25),
-        ('POW', 'Secondary box for 30-sachets', 90),
-    ]
+    ws_pm = wb['A5. PM Component Master']
     pkg_rows = []
-    for i, (df, comp, cost) in enumerate(pkg_data, 1):
-        pkg_rows.append({'id': i, 'delivery_form': df, 'component_name': comp, 'cost_per_pack': cost})
+    pkg_seq_id = 0
 
-    ws = ss.worksheet('packaging_configs')
-    batch_write(ws, pkg_rows, SCHEMAS['packaging_configs'])
-    print(f"  Imported {len(pkg_rows)} packaging configs")
-    time.sleep(1)
-
-    # =============================================
-    # 6. INVENTORY
-    # =============================================
-    print("Importing inventory...")
-    ws_inv = wb['material availability @ karsy']
-    inv_rows = []
-    inv_id = 0
-
-    for row in range(3, ws_inv.max_row + 1):
-        rm_name = ws_inv.cell(row=row, column=3).value
-        qty_raw = ws_inv.cell(row=row, column=4).value
-
-        if not rm_name or not isinstance(rm_name, str):
+    for row in range(4, ws_pm.max_row + 1):
+        pm_id_raw = ws_pm.cell(row=row, column=1).value
+        if pm_id_raw is None:
             continue
-        rm_name = rm_name.strip()
-        rm_id_val = rm_name_to_id.get(rm_name)
-        if not rm_id_val:
+        pm_id_str = safe_str(pm_id_raw)
+        if not pm_id_str:
             continue
 
-        qty_grams = 0
-        if qty_raw:
-            qty_str = str(qty_raw).strip().lower()
-            if qty_str == 'available':
-                qty_grams = 999999
-            elif qty_str.endswith('g'):
-                try:
-                    qty_grams = float(qty_str[:-1])
-                except ValueError:
-                    pass
-            else:
-                try:
-                    qty_grams = float(qty_str)
-                except ValueError:
-                    pass
+        comp_name = safe_str(ws_pm.cell(row=row, column=2).value)
+        formats_raw = safe_str(ws_pm.cell(row=row, column=3).value)
+        rate = safe_float(ws_pm.cell(row=row, column=5).value)
 
-        if qty_grams > 0:
-            inv_id += 1
-            inv_rows.append({
-                'id': inv_id,
-                'raw_material_id': rm_id_val,
-                'qty_grams': qty_grams,
-                'location': 'Karsy',
+        # Expand formats: "POW,GEL" → one row per format, "ALL" → one row with ALL
+        formats = [f.strip() for f in formats_raw.split(',') if f.strip()] if formats_raw else ['ALL']
+
+        for fmt in formats:
+            pkg_seq_id += 1
+            pkg_rows.append({
+                'id': pkg_seq_id,
+                'delivery_form': fmt,
+                'component_name': comp_name,
+                'cost_per_pack': rate,
             })
 
-    ws = ss.worksheet('inventory')
-    batch_write(ws, inv_rows, SCHEMAS['inventory'])
+    ws_gsheet = ss.worksheet('packaging_configs')
+    batch_write(ws_gsheet, pkg_rows, SCHEMAS['packaging_configs'])
+    print(f"  Imported {len(pkg_rows)} packaging config entries")
+    time.sleep(1)
+
+    # =========================================================================
+    # 7. INVENTORY
+    #    A3. RM Master col G = Avail @ Karsy (g)
+    #    Map to raw_material_id via rm_id_to_seq
+    # =========================================================================
+    print("Importing inventory...")
+    inv_rows = []
+    inv_seq_id = 0
+
+    for row in range(4, ws_rm.max_row + 1):
+        rm_id_raw = ws_rm.cell(row=row, column=1).value
+        if rm_id_raw is None:
+            continue
+        try:
+            rm_id_excel = int(rm_id_raw)
+        except (ValueError, TypeError):
+            continue
+
+        qty_raw = ws_rm.cell(row=row, column=7).value  # col G = Avail @ Karsy (g)
+        qty_grams = safe_float(qty_raw)
+        if qty_grams <= 0:
+            continue
+
+        rm_seq = rm_id_to_seq.get(rm_id_excel)
+        if not rm_seq:
+            continue
+
+        inv_seq_id += 1
+        inv_rows.append({
+            'id': inv_seq_id,
+            'raw_material_id': rm_seq,
+            'qty_grams': qty_grams,
+            'location': 'Karsy',
+        })
+
+    ws_gsheet = ss.worksheet('inventory')
+    batch_write(ws_gsheet, inv_rows, SCHEMAS['inventory'])
     print(f"  Imported {len(inv_rows)} inventory entries")
     time.sleep(1)
 
-    # =============================================
-    # 7. LAUNCH PHASES
-    # =============================================
+    # =========================================================================
+    # 8. LAUNCH PHASES (4 static entries)
+    # =========================================================================
     print("Importing launch phases...")
-    ws_lp2 = wb['Launch Plan']
-    phase_rows = []
-    for phase_num in range(1, 5):
-        date_val = val(ws_lp2, 3, 9 + phase_num)
-        if hasattr(date_val, 'strftime'):
-            date_str = date_val.strftime('%Y-%m-%d')
-        else:
-            date_str = str(date_val)
-        gap = 0 if phase_num == 1 else 90
-        phase_rows.append({
-            'id': phase_num, 'phase_number': phase_num,
-            'start_date': date_str, 'gap_days': gap,
-        })
-
-    ws = ss.worksheet('launch_phases')
-    batch_write(ws, phase_rows, SCHEMAS['launch_phases'])
+    phase_rows = [
+        {'id': 1, 'phase_number': 1, 'start_date': '2025-01-01', 'gap_days': 0},
+        {'id': 2, 'phase_number': 2, 'start_date': '2025-04-01', 'gap_days': 90},
+        {'id': 3, 'phase_number': 3, 'start_date': '2025-07-01', 'gap_days': 90},
+        {'id': 4, 'phase_number': 4, 'start_date': '2025-10-01', 'gap_days': 90},
+    ]
+    ws_gsheet = ss.worksheet('launch_phases')
+    batch_write(ws_gsheet, phase_rows, SCHEMAS['launch_phases'])
     print("  Imported 4 launch phases")
 
     wb.close()
-    print("\nDone! Google Sheet seeded successfully.")
+    print("\nDone! Google Sheet seeded successfully from V11.")
     print(f"View at: https://docs.google.com/spreadsheets/d/{SHEET_ID}")
 
 

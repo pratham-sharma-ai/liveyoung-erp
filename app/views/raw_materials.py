@@ -3,28 +3,47 @@ import pandas as pd
 from app.db import fetch_all, execute, execute_returning
 
 
-def render():
-    st.title("Raw Materials")
+def _fmt_rs(value):
+    if value is None or value == 0:
+        return "-"
+    return f"Rs {value:,.0f}"
 
-    tab1, tab2 = st.tabs(["View All", "Add New"])
+
+def render():
+    st.markdown("#### \U0001f9ea Raw Materials")
+
+    tab1, tab2 = st.tabs(["\U0001f4cb  View All", "\U00002795  Add New"])
 
     with tab1:
-        materials = fetch_all("""
-            SELECT rm.*,
-                   COALESCE(inv.qty_grams, 0) as stock_grams
-            FROM raw_materials rm
-            LEFT JOIN inventory inv ON inv.raw_material_id = rm.id
-            ORDER BY rm.name
-        """)
+        with st.spinner("Loading raw materials..."):
+            materials = fetch_all("""
+                SELECT rm.*,
+                       COALESCE(inv.qty_grams, 0) as stock_grams
+                FROM raw_materials rm
+                LEFT JOIN inventory inv ON inv.raw_material_id = rm.id
+                ORDER BY rm.name
+            """)
 
         if materials:
+            # Summary metrics
+            total = len(materials)
+            in_stock = sum(1 for m in materials if m['stock_grams'] > 0)
+            avg_rate = sum(m['rate_per_kg'] for m in materials if m['rate_per_kg']) / max(1, sum(1 for m in materials if m['rate_per_kg']))
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Materials", total)
+            c2.metric("In Stock", f"{in_stock} of {total}")
+            c3.metric("Avg Rate/KG", _fmt_rs(avg_rate))
+
+            st.markdown("---")
+
             # Filters
             c1, c2 = st.columns(2)
             categories = sorted(set(m['category'] for m in materials if m['category']))
             with c1:
                 cat_filter = st.multiselect("Filter by Category", categories)
             with c2:
-                search = st.text_input("Search by name")
+                search = st.text_input("Search by name", placeholder="Type to search...")
 
             filtered = materials
             if cat_filter:
@@ -35,22 +54,21 @@ def render():
             rows = []
             for m in filtered:
                 rows.append({
-                    'ID': m['id'],
                     'Name': m['name'],
                     'MOQ (kg)': m['moq_kg'],
-                    'Rate/KG (Rs)': f"{m['rate_per_kg']:,.0f}" if m['rate_per_kg'] else '-',
+                    'Rate/KG': _fmt_rs(m['rate_per_kg']),
                     'Category': m['category'],
                     'Source': m['source'],
-                    'Stock (g)': m['stock_grams'],
+                    'Stock (g)': f"{m['stock_grams']:,.0f}" if m['stock_grams'] > 0 else '-',
                     'Negotiator': m['negotiator'],
                 })
             df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True, hide_index=True)
-            st.caption(f"Showing {len(filtered)} of {len(materials)} raw materials")
+            st.caption(f"Showing {len(filtered)} of {total} raw materials")
 
             # Edit section
             st.markdown("---")
-            st.subheader("Edit Raw Material")
+            st.markdown("##### Edit Raw Material")
             rm_names = {m['name']: m['id'] for m in materials}
             selected = st.selectbox("Select material to edit", [""] + list(rm_names.keys()))
 
@@ -74,7 +92,7 @@ def render():
 
                     remarks = st.text_input("Remarks", rm['remarks'])
 
-                    if st.form_submit_button("Update"):
+                    if st.form_submit_button("Update", type="primary"):
                         execute("""
                             UPDATE raw_materials SET
                                 name=?, moq_kg=?, rate_per_kg=?, category=?,
@@ -85,11 +103,11 @@ def render():
                         st.success(f"Updated {name}")
                         st.rerun()
         else:
-            st.info("No raw materials found.")
+            st.info("No raw materials found. Add your first material below.")
 
     with tab2:
         with st.form("add_rm"):
-            st.subheader("Add New Raw Material")
+            st.markdown("##### Add New Raw Material")
             c1, c2, c3 = st.columns(3)
             name = c1.text_input("Name")
             moq = c2.number_input("MOQ (kg)", min_value=0.0, step=0.5)
@@ -100,7 +118,7 @@ def render():
             source = c2.text_input("Source (Natural/Synthetic)")
             negotiator = c3.text_input("Negotiator")
 
-            if st.form_submit_button("Add Raw Material"):
+            if st.form_submit_button("Add Raw Material", type="primary"):
                 if name:
                     try:
                         execute_returning("""

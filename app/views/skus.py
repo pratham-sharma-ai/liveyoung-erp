@@ -4,35 +4,62 @@ from app.db import fetch_all, fetch_one, execute, execute_returning
 
 
 def render():
-    st.title("SKUs & Launch Plan")
+    st.markdown("#### \U0001f4e6 SKUs & Launch Plan")
 
-    tab1, tab2 = st.tabs(["Launch Plan", "Add SKU"])
+    tab1, tab2 = st.tabs(["\U0001f4cb  Launch Plan", "\U00002795  Add SKU"])
 
+    # ==================================================================
+    # TAB 1 — Launch Plan
+    # ==================================================================
     with tab1:
-        # Phase info
-        phases = fetch_all("SELECT * FROM launch_phases ORDER BY phase_number")
+        with st.spinner("Loading launch plan..."):
+            # Phase info
+            phases = fetch_all("SELECT * FROM launch_phases ORDER BY phase_number")
+            skus = fetch_all("""
+                SELECT s.*, p.base_code, p.category, p.delivery_form, p.units_per_pack
+                FROM skus s
+                JOIN products p ON p.id = s.product_id
+                ORDER BY s.phase, p.category, p.delivery_form
+            """)
+
+        # Phase timeline
         if phases:
+            st.markdown("##### Phase Timeline")
             cols = st.columns(len(phases))
             for i, ph in enumerate(phases):
-                cols[i].metric(f"Phase {ph['phase_number']}", ph['start_date'])
-
-        st.markdown("---")
-
-        # All SKUs with product info
-        skus = fetch_all("""
-            SELECT s.*, p.base_code, p.category, p.delivery_form, p.units_per_pack
-            FROM skus s
-            JOIN products p ON p.id = s.product_id
-            ORDER BY s.phase, p.category, p.delivery_form
-        """)
+                phase_skus = [s for s in skus if int(s['phase']) == int(ph['phase_number'])]
+                total_packs = sum(int(s['pack_count']) for s in phase_skus)
+                cols[i].metric(
+                    f"Phase {int(ph['phase_number'])}",
+                    ph['start_date'],
+                    delta=f"{len(phase_skus)} SKUs, {total_packs:,} packs",
+                    delta_color="off",
+                )
+            st.markdown("---")
 
         if skus:
-            # Filter by phase
-            phase_filter = st.multiselect("Filter by Phase",
-                                          sorted(set(s['phase'] for s in skus)),
-                                          default=[])
+            # Summary
+            total_skus = len(skus)
+            total_packs = sum(int(s['pack_count']) for s in skus)
+            total_units = sum(int(s['pack_count']) * int(s['units_per_pack']) for s in skus)
 
-            filtered = skus if not phase_filter else [s for s in skus if s['phase'] in phase_filter]
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total SKUs", total_skus)
+            c2.metric("Total Packs", f"{total_packs:,}")
+            c3.metric("Total Units", f"{total_units:,}")
+
+            st.markdown("---")
+
+            # Filter by phase
+            all_phases = sorted(set(int(s['phase']) for s in skus))
+            phase_filter = st.multiselect(
+                "Filter by Phase",
+                all_phases,
+                default=[],
+                format_func=lambda x: f"Phase {x}",
+            )
+
+            filtered = skus if not phase_filter else [s for s in skus if int(s['phase']) in phase_filter]
 
             rows = []
             for s in filtered:
@@ -42,25 +69,26 @@ def render():
                     'Category': s['category'],
                     'Form': s['delivery_form'],
                     'Flavour': f"{s['flavour_name']} ({s['flavour_code']})",
-                    'Pack Count': s['pack_count'],
-                    'Units/Pack': s['units_per_pack'],
-                    'Total Units': s['pack_count'] * s['units_per_pack'],
-                    'Phase': s['phase'],
+                    'Pack Count': f"{int(s['pack_count']):,}",
+                    'Units/Pack': int(s['units_per_pack']),
+                    'Total Units': f"{int(s['pack_count']) * int(s['units_per_pack']):,}",
+                    'Phase': int(s['phase']),
                 })
             df = pd.DataFrame(rows)
             st.dataframe(df, use_container_width=True, hide_index=True)
 
             # Phase summary
             st.markdown("---")
-            st.subheader("Phase Summary")
-            for phase_num in sorted(set(s['phase'] for s in skus)):
-                phase_skus = [s for s in skus if s['phase'] == phase_num]
-                total_packs = sum(s['pack_count'] for s in phase_skus)
-                st.write(f"**Phase {phase_num}**: {len(phase_skus)} SKUs, {total_packs:,} packs")
+            st.markdown("##### Phase Summary")
+            for phase_num in sorted(set(int(s['phase']) for s in skus)):
+                phase_skus = [s for s in skus if int(s['phase']) == phase_num]
+                total = sum(int(s['pack_count']) for s in phase_skus)
+                products_in_phase = len(set(s['base_code'] for s in phase_skus))
+                st.write(f"**Phase {phase_num}**: {len(phase_skus)} SKUs across {products_in_phase} products = {total:,} packs")
 
             # Edit SKU
             st.markdown("---")
-            st.subheader("Edit SKU")
+            st.markdown("##### Edit SKU")
             sku_options = {s['sku_code']: s for s in skus}
             selected = st.selectbox("Select SKU to edit", [""] + list(sku_options.keys()))
 
@@ -72,7 +100,7 @@ def render():
                     pack_count = c2.number_input("Pack Count", value=int(s['pack_count']), min_value=0)
                     phase = c3.number_input("Phase", value=int(s['phase']), min_value=1, max_value=4)
 
-                    if st.form_submit_button("Update SKU"):
+                    if st.form_submit_button("Update SKU", type="primary"):
                         execute("""
                             UPDATE skus SET flavour_name=?, pack_count=?, phase=?
                             WHERE id=?
@@ -86,14 +114,17 @@ def render():
                     st.success(f"Deleted {selected}")
                     st.rerun()
         else:
-            st.info("No SKUs created yet.")
+            st.info("No SKUs created yet. Use the Add SKU tab to get started.")
 
+    # ==================================================================
+    # TAB 2 — Add SKU
+    # ==================================================================
     with tab2:
         products = fetch_all("SELECT id, base_code, category, delivery_form FROM products ORDER BY base_code")
 
         if products:
             with st.form("add_sku"):
-                st.subheader("Create New SKU")
+                st.markdown("##### Create New SKU")
 
                 c1, c2 = st.columns(2)
                 prod_options = {p['base_code']: p['id'] for p in products}
@@ -116,7 +147,7 @@ def render():
                 else:
                     sku_code = ""
 
-                if st.form_submit_button("Create SKU"):
+                if st.form_submit_button("Create SKU", type="primary"):
                     if flavour_code and flavour_name and sku_code:
                         prod_id = prod_options[selected_prod]
                         try:
