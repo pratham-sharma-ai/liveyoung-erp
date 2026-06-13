@@ -84,15 +84,13 @@ def _calc_product_costing(product, data):
     proc_per_unit = product['processing_cost_per_unit']
     processing_cost = proc_per_unit * units
 
-    # Total (Excel includes proc_per_unit + proc_total)
-    total_cost = pack_rm_cost + pack_pm_cost + proc_per_unit + processing_cost
+    total_cost = pack_rm_cost + pack_pm_cost + processing_cost
     buffer = total_cost * product['buffer_percent']
     net_total = total_cost + buffer
 
-    # Margin & SP (Excel formula)
     margin_pct = product['margin_percent']
-    gross_margin = net_total / (1 - margin_pct) if margin_pct < 1 else 0
-    selling_price = net_total + margin_pct + gross_margin
+    selling_price = net_total / (1 - margin_pct) if margin_pct < 1 else 0
+    gross_margin = selling_price - net_total
     multiplier = selling_price / net_total if net_total > 0 else 0
 
     # Packs

@@ -23,9 +23,12 @@ def render():
         if form not in proc_data:
             proc_data[form] = cost
 
-    cols = st.columns(len(proc_data))
-    for i, (form, cost) in enumerate(sorted(proc_data.items())):
-        cols[i].metric(form, f"Rs {cost:.2f}/unit")
+    if proc_data:
+        cols = st.columns(len(proc_data))
+        for i, (form, cost) in enumerate(sorted(proc_data.items())):
+            cols[i].metric(form, f"Rs {cost:.2f}/unit")
+    else:
+        st.info("No products configured yet.")
 
     with st.expander("What this means"):
         st.markdown("""

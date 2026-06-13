@@ -54,7 +54,7 @@ def render():
                     'Process/Unit': _fmt_rs(p['processing_cost_per_unit']),
                 })
             df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, use_container_width=True, hide_index=True, height=400)
 
             # Edit product details
             st.markdown("---")

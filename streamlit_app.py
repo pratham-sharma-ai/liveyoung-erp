@@ -37,7 +37,7 @@ except Exception as e:
 st.markdown("""
 <style>
     /* Tighten top padding */
-    .block-container { padding-top: 1rem; padding-bottom: 0rem; }
+    .block-container { padding-top: 1rem; padding-bottom: 3rem; }
 
     /* Metric cards */
     div[data-testid="stMetricValue"] { font-size: 1.6rem; font-weight: 700; }

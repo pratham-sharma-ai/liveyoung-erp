@@ -40,7 +40,7 @@ def render():
                 'PM Cost': c['pack_pm_cost'],
                 'Processing': c['processing_cost'],
                 'Total Cost': c['total_cost'],
-                'Buffer (10%)': c['buffer'],
+                'Buffer': c['buffer'],
                 'Net Total': c['net_total'],
                 'Margin %': margin_pct,
                 'Gross Margin': c['gross_margin'],
@@ -60,7 +60,7 @@ def render():
             )
             # Format currency columns
             currency_cols = ['RM Cost', 'PM Cost', 'Processing', 'Total Cost',
-                             'Buffer (10%)', 'Net Total', 'Gross Margin', 'Selling Price']
+                             'Buffer', 'Net Total', 'Gross Margin', 'Selling Price']
             styler.format({col: 'Rs {:,.0f}' for col in currency_cols})
             styler.format({'Margin %': '{:.0f}%', 'Multiplier': '{:.1f}x'})
             return styler
@@ -103,7 +103,10 @@ def render():
             st.info("Select a product above to view detailed costing.")
             return
 
-        prod_id = next(p['id'] for p in products if p['base_code'] == selected)
+        prod_id = next((p['id'] for p in products if p['base_code'] == selected), None)
+        if not prod_id:
+            st.warning("Product not found.")
+            return
 
         with st.spinner(f"Loading costing for {selected}..."):
             costing = get_product_costing(prod_id)
@@ -119,7 +122,8 @@ def render():
 
         import plotly.graph_objects as go
 
-        labels = ['Raw Material', 'Packaging', 'Processing', 'Buffer (10%)', 'Total Cost', 'Gross Margin', 'Selling Price']
+        buf_pct = costing['product']['buffer_percent'] * 100
+        labels = ['Raw Material', 'Packaging', 'Processing', f'Buffer ({buf_pct:.0f}%)', 'Total Cost', 'Gross Margin', 'Selling Price']
         values = [
             costing['pack_rm_cost'],
             costing['pack_pm_cost'],
@@ -189,8 +193,8 @@ def render():
             )
 
         net = costing['net_total']
-        new_gm = net / (1 - new_margin / 100) if new_margin < 100 else 0
-        new_sp = net + new_margin / 100 + new_gm
+        new_sp = net / (1 - new_margin / 100) if new_margin < 100 else 0
+        new_gm = new_sp - net
         delta_sp = new_sp - costing['selling_price']
 
         with sim_col2:

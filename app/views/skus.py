@@ -75,7 +75,7 @@ def render():
                     'Phase': int(s['phase']),
                 })
             df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, use_container_width=True, hide_index=True, height=400)
 
             # Phase summary
             st.markdown("---")

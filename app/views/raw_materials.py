@@ -63,7 +63,7 @@ def render():
                     'Negotiator': m['negotiator'],
                 })
             df = pd.DataFrame(rows)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, use_container_width=True, hide_index=True, height=400)
             st.caption(f"Showing {len(filtered)} of {total} raw materials")
 
             # Edit section
