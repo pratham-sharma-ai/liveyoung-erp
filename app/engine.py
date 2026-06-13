@@ -195,15 +195,16 @@ def get_rm_order_requirements():
         moq_kg = rm['moq_kg'] or 0
         rate = rm['rate_per_kg'] or 0
 
-        order_kg = max(total_kg, moq_kg) if total_kg > 0 else 0
-        actual_cost = order_kg * rate
-        surplus_kg = max(0, moq_kg - total_kg) if total_kg > 0 else 0
-        surplus_cost = surplus_kg * rate
-
         inv = data['inv_map'].get(rm_id)
         inv_grams = inv['qty_grams'] if inv else 0
         inv_status = 'sufficient' if inv_grams >= total_grams else ('partial' if inv_grams > 0 else 'none')
         shortfall_grams = max(0, total_grams - inv_grams)
+
+        net_to_buy_kg = max(0, total_kg - inv_grams / 1000)
+        order_kg = max(net_to_buy_kg, moq_kg) if net_to_buy_kg > 0 else 0
+        actual_cost = order_kg * rate
+        surplus_kg = max(0, moq_kg - net_to_buy_kg) if net_to_buy_kg > 0 else 0
+        surplus_cost = surplus_kg * rate
 
         results.append({
             'raw_material': rm['name'],
